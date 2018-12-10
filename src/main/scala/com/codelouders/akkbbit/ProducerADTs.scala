@@ -1,5 +1,11 @@
 package com.codelouders.akkbbit
 
-class ProducerADTs {
+trait SentStatus
 
+object SentStatus{
+  case object MessageSent extends SentStatus
+  final case class FailedToSent(cause: Exception) extends SentStatus
 }
+
+
+case class PassThroughStatusMessage[T](status: SentStatus, message: T)
