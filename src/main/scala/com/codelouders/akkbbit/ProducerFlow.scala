@@ -4,7 +4,9 @@ import akka.NotUsed
 import akka.stream.{ActorMaterializer, BufferOverflowException, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
-import com.codelouders.akkbbit.SentStatus.MessageSent
+import com.codelouders.akkbbit.SentError.TooManyAttempts
+import com.codelouders.akkbbit.SentStatus.{FailedToSent, MessageSent}
+import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.duration.FiniteDuration
 import scala.collection.immutable.Seq
@@ -16,18 +18,11 @@ trait ProducerFlow {
     * never dies, not even when disconnected.
     * by default when buffer overflows the oldest messages in buffer are going to be dropped
     * We don't support OverflowStrategy.backpressure at the moment!
+    *
     * @tparam T
     * @return
     */
   def createFlow[T](
-      overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead): Flow[T, SentStatus, NotUsed]
-
-  /**
-    * TODO!
-    * @tparam T
-    * @return
-    */
-  def createPassThroughFlow[T](
       serializer: T ⇒ ByteString,
       overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
     : Flow[T, PassThroughStatusMessage[T], NotUsed]
@@ -42,74 +37,100 @@ trait ProducerSink {
     * when buffer overflows the oldest messages in buffer are going to be dropped
     * @tparam T
     */
-  def createSink[T](): Sink[T, NotUsed]
+  def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed]
 }
 
 class Producer(
     mqService: MQService,
+    connectionParams: MQConnectionParams,
     reconnectInterval: FiniteDuration,
     maxRetries: Int,
     maxBufferSize: Int = 2048)(implicit am: ActorMaterializer)
     extends ProducerFlow
-    with ProducerSink {
+    with ProducerSink
+    with LazyLogging {
 
-  override def createFlow[T](overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
-    : Flow[T, SentStatus, NotUsed] =
+  override def createFlow[T](
+      serializer: T ⇒ ByteString,
+      overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
+    : Flow[T, PassThroughStatusMessage[T], NotUsed] =
     Flow[T]
-    //TODO: SEND!
       .map(Right(_))
       .merge(Source.tick(reconnectInterval, reconnectInterval, Left()))
-      .statefulMapConcat { () ⇒
-//        var connection =
-        var buffer = Seq.empty[T]
+      .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
+        var connection = mqService.connect(connectionParams)
+        var buffer = Seq.empty[RetriableMessage[T]]
 
         {
           case Left(_) ⇒
-            Seq.empty
+            if (!mqService.isAlive(connection))
+              connection = mqService.connect(connectionParams)
+
+            val result = send(buffer, connection, serializer)
+            buffer = result.newBuffer
+            result.output
 
           case Right(msg) ⇒
             if (buffer.size + 1 > maxBufferSize)
               buffer = executeOverFlowStrategy(buffer, msg, overflowStrategy)
             else
-              buffer = buffer :+ msg
+              buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
-            if (connected)
-              send(buffer)
+            if (!mqService.isAlive(connection)) {
+              val result = send(buffer, connection, serializer)
+              buffer = result.newBuffer
+              result.output
+            }
             else
               Seq.empty
+
         }
       }
-      .map(_ ⇒ MessageSent)
 
-  //TODO: create ampq conf classes and pass them here
-  override def createPassThroughFlow[T](
-      overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
-    : Flow[T, PassThroughStatusMessage[T], NotUsed] =
-    Flow[T]
-      .map(in ⇒ PassThroughStatusMessage(MessageSent, in))
-
-  override def createSink[T](): Sink[T, NotUsed] =
+  override def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed] =
     MergeHub
       .source[T](256)
-      .via(createFlow(OverflowStrategy.dropHead))
+      .via(createFlow(serializer, OverflowStrategy.dropHead))
       .to(Sink.ignore)
       .run()
 
-  private def connected: Boolean = {
-    true
-  }
+  private def send[T](
+      buffer: Seq[RetriableMessage[T]],
+      connection: MQConnection,
+      serializer: T ⇒ ByteString): SendResult[T] = {
 
-  private def send[T](buffer: Seq[T]): Seq[T] = {
-    buffer
+    val (sent, notSent) = buffer.partition { el ⇒
+      mqService.send(connection, serializer(el.message))
+    }
+
+    val (drop, leave) =
+      notSent
+        .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
+        .partition(_.attemptsCounter > maxRetries)
+
+    val successful = sent.map { el ⇒
+      PassThroughStatusMessage(MessageSent, el.message)
+    }
+
+    val failures = drop.map { el ⇒
+      PassThroughStatusMessage(
+        FailedToSent(TooManyAttempts(el.attemptsCounter, maxRetries + 1)),
+        el.message)
+    }
+
+    SendResult(successful ++ failures, leave)
   }
 
   private def executeOverFlowStrategy[T](
-      buffer: Seq[T],
+      buffer: Seq[RetriableMessage[T]],
       msg: T,
-      overflowStrategy: OverflowStrategy): Seq[T] = {
+      overflowStrategy: OverflowStrategy): Seq[RetriableMessage[T]] = {
+
+    logger.warn(s"Applying overflow strategy: $overflowStrategy")
+
     overflowStrategy match {
       case OverflowStrategy.dropHead ⇒
-        buffer.tail :+ msg
+        buffer.tail :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
       case OverflowStrategy.dropNew ⇒
         buffer
@@ -121,7 +142,7 @@ class Producer(
         Seq.empty
 
       case OverflowStrategy.dropTail ⇒
-        buffer.dropRight(1) :+ msg
+        buffer.dropRight(1) :+ RetriableMessage(attemptsCounter = 0, message = msg)
     }
   }
 }
