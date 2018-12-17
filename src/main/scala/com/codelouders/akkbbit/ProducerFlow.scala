@@ -45,7 +45,7 @@ trait ProducerSink {
 }
 
 class Producer(
-    mqService: MQService,
+    mqService: MQService[MQConnectionParams, MQConnection],
     connectionParams: MQConnectionParams,
     maxRetries: Int = Int.MaxValue,
     reconnectInterval: FiniteDuration = 1 second,
