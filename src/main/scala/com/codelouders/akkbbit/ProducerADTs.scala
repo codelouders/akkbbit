@@ -15,7 +15,7 @@ object SentError {
   final case class TooManyAttempts(numberOfAttempts: Int, threshold: Int) extends SentError
 }
 
-private[akkbbit] trait IncomingMessage[+T]
+private[akkbbit] trait IncomingMessage[T]
 private[akkbbit] object IncomingMessage {
   final case class MessageToSend[T](msg: T) extends IncomingMessage[T]
   case object ReconnectionTick extends IncomingMessage[Nothing]
