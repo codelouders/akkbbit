@@ -2,20 +2,18 @@ package com.codelouders.akkbbit
 
 import scala.collection.immutable.Seq
 
-sealed trait SentStatus
+case class PassThroughStatusMessage[T](status: SentStatus, message: T)
 
+sealed trait SentStatus
 object SentStatus {
   case object MessageSent extends SentStatus
   final case class FailedToSent(cause: SentError) extends SentStatus
 }
 
 sealed trait SentError
-
 object SentError {
   final case class TooManyAttempts(numberOfAttempts: Int, threshold: Int) extends SentError
 }
-
-case class PassThroughStatusMessage[T](status: SentStatus, message: T)
 
 private[akkbbit] trait IncomingMessage[+T]
 private[akkbbit] object IncomingMessage {
