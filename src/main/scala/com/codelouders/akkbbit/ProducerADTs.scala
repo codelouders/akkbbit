@@ -17,8 +17,14 @@ object SentError {
 
 case class PassThroughStatusMessage[T](status: SentStatus, message: T)
 
-private case class RetriableMessage[T](attemptsCounter: Int, message: T)
+private[akkbbit] trait IncomingMessage[+T]
+private[akkbbit] object IncomingMessage {
+  final case class MessageToSend[T](msg: T) extends IncomingMessage[T]
+  case object ReconnectionTick extends IncomingMessage[Nothing]
+}
 
-private case class SendResult[T](
+private[akkbbit] case class RetriableMessage[T](attemptsCounter: Int, message: T)
+
+private[akkbbit] case class SendResult[T](
     output: Seq[PassThroughStatusMessage[T]],
     newBuffer: Seq[RetriableMessage[T]])

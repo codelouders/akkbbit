@@ -1,9 +1,11 @@
 package com.codelouders.akkbbit
 
 import akka.NotUsed
+import akka.actor.Cancellable
 import akka.stream.{ActorMaterializer, BufferOverflowException, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
+import com.codelouders.akkbbit.IncomingMessage.{MessageToSend, ReconnectionTick}
 import com.codelouders.akkbbit.SentError.TooManyAttempts
 import com.codelouders.akkbbit.SentStatus.{FailedToSent, MessageSent}
 import com.typesafe.scalalogging.LazyLogging
@@ -44,9 +46,9 @@ trait ProducerSink {
   def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed]
 }
 
-class Producer(
-    mqService: MQService[MQConnectionParams, MQConnection],
-    connectionParams: MQConnectionParams,
+class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
+    mqService: MQService[Params, Conn],
+    connectionParams: Params,
     maxRetries: Int = Int.MaxValue,
     reconnectInterval: FiniteDuration = 1 second,
     maxBufferSize: Int = 2048)(implicit am: ActorMaterializer)
@@ -64,16 +66,16 @@ class Producer(
       "Backpressure strategy is not supported")
 
     Flow[T]
-      .map(Right(_))
+      .map(MessageToSend(_))
       .async
-      .merge(Source.tick(reconnectInterval, reconnectInterval, Left()))
+      .merge(tickingSource)
       .async
       .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
         var connection = mqService.connect(connectionParams)
         var buffer = Seq.empty[RetriableMessage[T]]
 
         {
-          case Left(_) ⇒
+          case ReconnectionTick ⇒
             if (!mqService.isAlive(connection))
               connection = mqService.connect(connectionParams)
 
@@ -81,13 +83,14 @@ class Producer(
             buffer = returnState.newBuffer
             returnState.output
 
-          case Right(msg) ⇒
+          case MessageToSend(msg) ⇒
             if (buffer.size + 1 > maxBufferSize)
               buffer = executeOverFlowStrategy(buffer, msg, overflowStrategy)
             else
               buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
-            if (!mqService.isAlive(connection)) {
+            if (mqService.isAlive(connection)) {
+              // do we need to set connection to some other state or it will be done by driver?
               val returnState = send(buffer, connection, serializer)
               buffer = returnState.newBuffer
               returnState.output
@@ -110,6 +113,11 @@ class Producer(
       .to(Sink.ignore)
       .run()
 
+  protected def tickingSource: Source[ReconnectionTick.type, NotUsed] =
+    Source
+      .tick(reconnectInterval, reconnectInterval, ReconnectionTick)
+      .mapMaterializedValue(_ ⇒ NotUsed)
+
   private def updateNumberOfAttempts[T](
       buffer: Seq[RetriableMessage[T]]): (Seq[RetriableMessage[T]], Seq[RetriableMessage[T]]) =
     buffer
@@ -118,7 +126,7 @@ class Producer(
 
   private def send[T](
       buffer: Seq[RetriableMessage[T]],
-      connection: MQConnection,
+      connection: Conn,
       serializer: T ⇒ ByteString): SendResult[T] = {
 
     val (sent, notSent) = buffer.partition { el ⇒
@@ -148,19 +156,19 @@ class Producer(
     logger.warn(s"Applying overflow strategy: $overflowStrategy")
 
     overflowStrategy match {
-      case OverflowStrategy.dropHead ⇒
+      case st: OverflowStrategy if st == OverflowStrategy.dropHead ⇒
         buffer.tail :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
-      case OverflowStrategy.dropNew ⇒
+      case st: OverflowStrategy if st == OverflowStrategy.dropNew ⇒
         buffer
 
-      case OverflowStrategy.fail ⇒
+      case st: OverflowStrategy if st == OverflowStrategy.fail ⇒
         throw BufferOverflowException("MQ flow buffer max size reached! Failing flow.")
 
-      case OverflowStrategy.dropBuffer ⇒
+      case st: OverflowStrategy if st == OverflowStrategy.dropBuffer ⇒
         Seq.empty
 
-      case OverflowStrategy.dropTail ⇒
+      case st: OverflowStrategy if st == OverflowStrategy.dropTail ⇒
         buffer.dropRight(1) :+ RetriableMessage(attemptsCounter = 0, message = msg)
     }
   }

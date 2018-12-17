@@ -24,5 +24,7 @@ class RabbitMQService extends MQService[RabbitConnectionParams, RabbitMQConnecti
     connection.connection.isOpen
 
   //do we need channel here?
-  override def send(connection: RabbitMQConnection, data: ByteString): Boolean = {}
+  override def send(connection: RabbitMQConnection, data: ByteString): Boolean = {
+    true
+  }
 }
