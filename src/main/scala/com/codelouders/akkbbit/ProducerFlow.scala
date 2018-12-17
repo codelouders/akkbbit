@@ -8,6 +8,7 @@ import com.codelouders.akkbbit.SentError.TooManyAttempts
 import com.codelouders.akkbbit.SentStatus.{FailedToSent, MessageSent}
 import com.typesafe.scalalogging.LazyLogging
 
+import scala.concurrent.duration._
 import scala.concurrent.duration.FiniteDuration
 import scala.collection.immutable.Seq
 
@@ -35,6 +36,9 @@ trait ProducerSink {
     * This never dyes! Only one connection created.
     * Many producers can be connected because it uses merghub under the hood.
     * when buffer overflows the oldest messages in buffer are going to be dropped
+    *
+    * set max retries to 0 is you need immediate - result/feedback
+    *
     * @tparam T
     */
   def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed]
@@ -43,8 +47,8 @@ trait ProducerSink {
 class Producer(
     mqService: MQService,
     connectionParams: MQConnectionParams,
-    reconnectInterval: FiniteDuration,
-    maxRetries: Int,
+    maxRetries: Int = Int.MaxValue,
+    reconnectInterval: FiniteDuration = 1 second,
     maxBufferSize: Int = 2048)(implicit am: ActorMaterializer)
     extends ProducerFlow
     with ProducerSink
@@ -53,10 +57,15 @@ class Producer(
   override def createFlow[T](
       serializer: T ⇒ ByteString,
       overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
-    : Flow[T, PassThroughStatusMessage[T], NotUsed] =
+    : Flow[T, PassThroughStatusMessage[T], NotUsed] = {
+
+    require(overflowStrategy != OverflowStrategy.backpressure, "Backpressure is not supported")
+
     Flow[T]
       .map(Right(_))
+      .async
       .merge(Source.tick(reconnectInterval, reconnectInterval, Left()))
+      .async
       .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
         var connection = mqService.connect(connectionParams)
         var buffer = Seq.empty[RetriableMessage[T]]
@@ -66,9 +75,9 @@ class Producer(
             if (!mqService.isAlive(connection))
               connection = mqService.connect(connectionParams)
 
-            val result = send(buffer, connection, serializer)
-            buffer = result.newBuffer
-            result.output
+            val returnState = send(buffer, connection, serializer)
+            buffer = returnState.newBuffer
+            returnState.output
 
           case Right(msg) ⇒
             if (buffer.size + 1 > maxBufferSize)
@@ -77,22 +86,33 @@ class Producer(
               buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
             if (!mqService.isAlive(connection)) {
-              val result = send(buffer, connection, serializer)
-              buffer = result.newBuffer
-              result.output
+              val returnState = send(buffer, connection, serializer)
+              buffer = returnState.newBuffer
+              returnState.output
             }
-            else
-              Seq.empty
-
+            else {
+              val (tooManyAttempts, updatedBuffer) = updateNumberOfAttempts(buffer)
+              buffer = updatedBuffer
+              tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
+            }
         }
       }
+      .async
+  }
 
   override def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed] =
     MergeHub
       .source[T](256)
       .via(createFlow(serializer, OverflowStrategy.dropHead))
+      .async
       .to(Sink.ignore)
       .run()
+
+  private def updateNumberOfAttempts[T](
+      buffer: Seq[RetriableMessage[T]]): (Seq[RetriableMessage[T]], Seq[RetriableMessage[T]]) =
+    buffer
+      .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
+      .partition(_.attemptsCounter > maxRetries)
 
   private def send[T](
       buffer: Seq[RetriableMessage[T]],
@@ -103,23 +123,20 @@ class Producer(
       mqService.send(connection, serializer(el.message))
     }
 
-    val (drop, leave) =
-      notSent
-        .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
-        .partition(_.attemptsCounter > maxRetries)
+    val (tooManyAttempts, updatedBuffer) = updateNumberOfAttempts(notSent)
 
     val successful = sent.map { el ⇒
       PassThroughStatusMessage(MessageSent, el.message)
     }
 
-    val failures = drop.map { el ⇒
-      PassThroughStatusMessage(
-        FailedToSent(TooManyAttempts(el.attemptsCounter, maxRetries + 1)),
-        el.message)
-    }
-
-    SendResult(successful ++ failures, leave)
+    val failures = tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
+    SendResult(successful ++ failures, updatedBuffer)
   }
+
+  private def wrapIntoTooManyAttemptsMessage[T](retriableMessage: RetriableMessage[T]) =
+    PassThroughStatusMessage(
+      FailedToSent(TooManyAttempts(retriableMessage.attemptsCounter, maxRetries + 1)),
+      retriableMessage.message)
 
   private def executeOverFlowStrategy[T](
       buffer: Seq[RetriableMessage[T]],
@@ -136,7 +153,7 @@ class Producer(
         buffer
 
       case OverflowStrategy.fail ⇒
-        throw BufferOverflowException("Ampq flow buffer max size reached! Failing flow.")
+        throw BufferOverflowException("MQ flow buffer max size reached! Failing flow.")
 
       case OverflowStrategy.dropBuffer ⇒
         Seq.empty
