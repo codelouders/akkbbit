@@ -1,7 +1,6 @@
 package com.codelouders.akkbbit
 
 import akka.NotUsed
-import akka.actor.Cancellable
 import akka.stream.{ActorMaterializer, BufferOverflowException, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
@@ -65,11 +64,9 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
       overflowStrategy != OverflowStrategy.backpressure,
       "Backpressure strategy is not supported")
 
-    Flow[T]
+    Flow[T].async
       .map(MessageToSend(_))
-      .async
-      .merge(tickingSource)
-      .async
+      .merge(tickingSource.async)
       .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
         var connection = mqService.connect(connectionParams)
         var buffer = Seq.empty[RetriableMessage[T]]
