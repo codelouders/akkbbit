@@ -2,11 +2,25 @@ package com.codelouders.akkbbit
 
 import akka.util.ByteString
 
-trait MQService {
-  def connect(connectionParams: MQConnectionParams): MQConnection
-  def isAlive(connection: MQConnection): Boolean
-  def send(connection: MQConnection, data: ByteString): Boolean
+import scala.concurrent.duration.FiniteDuration
+
+trait MQService[T <: MQConnectionParams, R <: MQConnection] {
+  def connect(connectionParams: T): R
+  def isAlive(connection: R): Boolean
+  def send(connection: R, data: ByteString): Boolean
 }
 
 trait MQConnection
-trait MQConnectionParams
+
+/**
+  * Make sure that connectionTimeout is lower than reconnection interval
+  *
+  * @param host
+  * @param port
+  * @param connectionTimeout
+  */
+trait MQConnectionParams {
+  def host: String
+  def port: Int
+  def connectionTimeout: FiniteDuration
+}

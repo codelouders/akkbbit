@@ -59,7 +59,9 @@ class Producer(
       overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
     : Flow[T, PassThroughStatusMessage[T], NotUsed] = {
 
-    require(overflowStrategy != OverflowStrategy.backpressure, "Backpressure is not supported")
+    require(
+      overflowStrategy != OverflowStrategy.backpressure,
+      "Backpressure strategy is not supported")
 
     Flow[T]
       .map(Right(_))
