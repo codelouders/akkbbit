@@ -1,12 +1,13 @@
-package com.codelouders.akkbbit
+package com.codelouders.akkbbit.producer
 
 import akka.NotUsed
 import akka.stream.{ActorMaterializer, BufferOverflowException, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
-import com.codelouders.akkbbit.IncomingMessage.{MessageToSend, ReconnectionTick}
-import com.codelouders.akkbbit.SentError.TooManyAttempts
-import com.codelouders.akkbbit.SentStatus.{FailedToSent, MessageSent}
+import com.codelouders.akkbbit.producer.IncomingMessage.{MessageToSend, ReconnectionTick}
+import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
+import com.codelouders.akkbbit.producer.SentStatus.{FailedToSent, MessageSent}
+import com.codelouders.akkbbit.{MQConnection, MQConnectionParams, MQService}
 import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.duration._
@@ -45,7 +46,7 @@ trait ProducerSink {
   def createSink[T](serializer: T ⇒ ByteString): Sink[T, NotUsed]
 }
 
-class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
+protected[akkbbit] class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
     mqService: MQService[Params, Conn],
     connectionParams: Params,
     maxRetries: Int = Int.MaxValue,
@@ -76,7 +77,9 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
             if (!mqService.isAlive(connection))
               connection = mqService.connect(connectionParams)
 
+            logger.debug(s"Messages to resend: $buffer")
             val returnState = send(buffer, connection, serializer)
+            logger.debug(s"Messages saved for another retry: ${returnState.newBuffer}")
             buffer = returnState.newBuffer
             returnState.output
 
@@ -87,14 +90,19 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
               buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
             if (mqService.isAlive(connection)) {
+              logger.debug(s"Messages to send: $buffer")
               // do we need to set connection to some other state or it will be done by driver?
               val returnState = send(buffer, connection, serializer)
               buffer = returnState.newBuffer
+              logger.debug(s"Messages saved for retry: $buffer")
               returnState.output
             }
             else {
-              val (tooManyAttempts, updatedBuffer) = updateNumberOfAttempts(buffer)
+              buffer = buffer.updated(buffer.size - 1, buffer.last.copy(attemptsCounter = 1))
+              val (tooManyAttempts, updatedBuffer) = spitByAttempts(buffer)
               buffer = updatedBuffer
+              logger.debug(s"Messages saved for retry: $updatedBuffer")
+              logger.debug(s"Failed to sent(too many attempts): $tooManyAttempts")
               tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
             }
         }
@@ -106,7 +114,6 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
     MergeHub
       .source[T](256)
       .via(createFlow(serializer, OverflowStrategy.dropHead))
-      .async
       .to(Sink.ignore)
       .run()
 
@@ -116,10 +123,17 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
       .mapMaterializedValue(_ ⇒ NotUsed)
 
   private def updateNumberOfAttempts[T](
-      buffer: Seq[RetriableMessage[T]]): (Seq[RetriableMessage[T]], Seq[RetriableMessage[T]]) =
+      buffer: Seq[RetriableMessage[T]]): Seq[RetriableMessage[T]] = {
+    logger.info(s"buffer before update attempts: $buffer")
     buffer
       .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
+  }
+
+  private def spitByAttempts[T](
+      buffer: Seq[RetriableMessage[T]]): (Seq[RetriableMessage[T]], Seq[RetriableMessage[T]]) = {
+    buffer
       .partition(_.attemptsCounter > maxRetries)
+  }
 
   private def send[T](
       buffer: Seq[RetriableMessage[T]],
@@ -130,7 +144,7 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
       mqService.send(connection, serializer(el.message))
     }
 
-    val (tooManyAttempts, updatedBuffer) = updateNumberOfAttempts(notSent)
+    val (tooManyAttempts, updatedBuffer) = spitByAttempts(updateNumberOfAttempts(notSent))
 
     val successful = sent.map { el ⇒
       PassThroughStatusMessage(MessageSent, el.message)
@@ -150,7 +164,7 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
       msg: T,
       overflowStrategy: OverflowStrategy): Seq[RetriableMessage[T]] = {
 
-    logger.warn(s"Applying overflow strategy: $overflowStrategy")
+    logger.warn(s"Applying buffer overflow strategy: $overflowStrategy")
 
     overflowStrategy match {
       case st: OverflowStrategy if st == OverflowStrategy.dropHead ⇒
@@ -163,7 +177,7 @@ class Producer[Params <: MQConnectionParams, Conn <: MQConnection](
         throw BufferOverflowException("MQ flow buffer max size reached! Failing flow.")
 
       case st: OverflowStrategy if st == OverflowStrategy.dropBuffer ⇒
-        Seq.empty
+        Seq.empty :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
       case st: OverflowStrategy if st == OverflowStrategy.dropTail ⇒
         buffer.dropRight(1) :+ RetriableMessage(attemptsCounter = 0, message = msg)

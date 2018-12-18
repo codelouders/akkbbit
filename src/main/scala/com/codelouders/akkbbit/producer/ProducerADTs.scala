@@ -1,4 +1,4 @@
-package com.codelouders.akkbbit
+package com.codelouders.akkbbit.producer
 
 import scala.collection.immutable.Seq
 

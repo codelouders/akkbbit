@@ -1,35 +1,29 @@
 package com.codelouders.akkbbit
 import akka.util.ByteString
+import com.typesafe.scalalogging.LazyLogging
 
-class FakeMQService extends MQService[MQConnectionParams, FakeConnection] {
+class FakeMQService extends MQService[MQConnectionParams, FakeConnection] with LazyLogging {
+
+  var reconnect = true
+  var isAliveState = true
+
+  def disconnect(): Unit = {
+    isAliveState = false
+  }
 
   override def connect(connectionParams: MQConnectionParams): FakeConnection = {
+    isAliveState = reconnect
     new FakeConnection
   }
 
   override def isAlive(connection: FakeConnection): Boolean = {
-    connection.isAlive
+    logger.info(s"Is alive: $isAliveState")
+    isAliveState
   }
 
   override def send(connection: FakeConnection, data: ByteString): Boolean = {
-    if (connection.failNextSendAttempt) {
-      connection.disconnect
-      false
-    }
-    else
-      true
+    isAliveState && reconnect
   }
 }
 
-class FakeConnection extends MQConnection {
-  var isAlive = true
-  var failNextSendAttempt = false
-
-  def disconnect: Unit = {
-    isAlive = false
-  }
-
-  def failNext = {
-    failNextSendAttempt = true
-  }
-}
+class FakeConnection extends MQConnection
