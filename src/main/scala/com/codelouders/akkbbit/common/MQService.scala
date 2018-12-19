@@ -1,4 +1,4 @@
-package com.codelouders.akkbbit
+package com.codelouders.akkbbit.common
 
 import akka.util.ByteString
 

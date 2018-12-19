@@ -7,7 +7,7 @@ import akka.util.ByteString
 import com.codelouders.akkbbit.producer.IncomingMessage.{MessageToSend, ReconnectionTick}
 import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
 import com.codelouders.akkbbit.producer.SentStatus.{FailedToSent, MessageSent}
-import com.codelouders.akkbbit.{MQConnection, MQConnectionParams, MQService}
+import com.codelouders.akkbbit.common.{MQConnection, MQConnectionParams, MQService}
 import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.duration._
@@ -55,6 +55,8 @@ protected[akkbbit] class Producer[Params <: MQConnectionParams, Conn <: MQConnec
     extends ProducerFlow
     with ProducerSink
     with LazyLogging {
+
+  require(connectionParams.connectionTimeout < reconnectInterval)
 
   override def createFlow[T](
       serializer: T ⇒ ByteString,

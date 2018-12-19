@@ -1,7 +1,7 @@
 package com.codelouders.akkbbit.rabbit
 
 import akka.util.ByteString
-import com.codelouders.akkbbit.MQService
+import com.codelouders.akkbbit.common.MQService
 import com.rabbitmq.client.ConnectionFactory
 
 class RabbitMQService extends MQService[RabbitConnectionParams, RabbitMQConnection] {
