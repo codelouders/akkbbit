@@ -15,10 +15,12 @@ class StubMQService extends MQService[MQConnectionParams, StubConnection] with L
     isAliveState = false
   }
 
-  override def connect(connectionParams: MQConnectionParams): StubConnection = {
+  override def connect(connectionParams: MQConnectionParams): Option[StubConnection] = {
     logger.info(s"[connect] reconnect: $reconnect")
     isAliveState = reconnect
-    new StubConnection
+    if (isAliveState)
+      Some(new StubConnection)
+    else None
   }
 
   override def isAlive(connection: StubConnection): Boolean = {

@@ -5,7 +5,7 @@ import akka.util.ByteString
 import scala.concurrent.duration.FiniteDuration
 
 trait MQService[T <: MQConnectionParams, R <: MQConnection] {
-  def connect(connectionParams: T): R
+  def connect(connectionParams: T): Option[R]
   def isAlive(connection: R): Boolean
   def send(connection: R, data: ByteString): Boolean
 }

@@ -76,14 +76,21 @@ protected[akkbbit] class Producer[Params <: MQConnectionParams, Conn <: MQConnec
 
         {
           case ReconnectionTick ⇒
-            if (!mqService.isAlive(connection))
+            if (!connection.exists(mqService.isAlive))
               connection = mqService.connect(connectionParams)
 
-            logger.debug(s"Messages to resend: $buffer")
-            val returnState = send(buffer, connection, serializer)
-            logger.debug(s"Messages saved for another retry: ${returnState.newBuffer}")
-            buffer = returnState.newBuffer
-            returnState.output
+            connection match {
+              case Some(conn) ⇒
+                val returnState = send(buffer, conn, serializer)
+                logger.debug(s"Messages saved for another retry: ${returnState.newBuffer}")
+                buffer = returnState.newBuffer
+                returnState.output
+              case None ⇒
+                val (tooManyAttempts, updatedBuffer) =
+                  spitByAttempts(updateNumberOfAttempts(buffer))
+                buffer = updatedBuffer
+                tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
+            }
 
           case MessageToSend(msg) ⇒
             if (buffer.size + 1 > maxBufferSize)
@@ -91,21 +98,21 @@ protected[akkbbit] class Producer[Params <: MQConnectionParams, Conn <: MQConnec
             else
               buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
 
-            if (mqService.isAlive(connection)) {
-              logger.debug(s"Messages to send: $buffer")
-              // do we need to set connection to some other state or it will be done by driver?
-              val returnState = send(buffer, connection, serializer)
-              buffer = returnState.newBuffer
-              logger.debug(s"Messages saved for retry: $buffer")
-              returnState.output
-            }
-            else {
-              buffer = buffer.updated(buffer.size - 1, buffer.last.copy(attemptsCounter = 1))
-              val (tooManyAttempts, updatedBuffer) = spitByAttempts(buffer)
-              buffer = updatedBuffer
-              logger.debug(s"Messages saved for retry: $updatedBuffer")
-              logger.debug(s"Failed to sent(too many attempts): $tooManyAttempts")
-              tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
+            connection match {
+              case Some(conn) if mqService.isAlive(conn) ⇒
+                logger.debug(s"Messages to send: $buffer")
+                // do we need to set connection to some other state or it will be done by driver?
+                val returnState = send(buffer, conn, serializer)
+                buffer = returnState.newBuffer
+                logger.debug(s"Messages saved for retry: $buffer")
+                returnState.output
+              case _ ⇒
+                buffer = buffer.updated(buffer.size - 1, buffer.last.copy(attemptsCounter = 1))
+                val (tooManyAttempts, updatedBuffer) = spitByAttempts(buffer)
+                buffer = updatedBuffer
+                logger.debug(s"Messages saved for retry: $updatedBuffer")
+                logger.debug(s"Failed to sent(too many attempts): $tooManyAttempts")
+                tooManyAttempts.map(wrapIntoTooManyAttemptsMessage)
             }
         }
       }

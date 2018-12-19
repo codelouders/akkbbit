@@ -9,6 +9,7 @@ import scala.concurrent.duration.FiniteDuration
 class RabbitProducer(
     rabbitMQService: RabbitMQService,
     rabbitConnectionParams: RabbitConnectionParams,
+    channel: RabbitQueue,
     maxRetries: Int = Int.MaxValue,
     reconnectInterval: FiniteDuration = 1 second,
     maxBufferSize: Int = 2048)(implicit am: ActorMaterializer)
