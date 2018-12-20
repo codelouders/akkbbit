@@ -2,7 +2,7 @@ name := "akkbbit"
 
 organization := "com.codelouders"
 
-version := "0.1.1"
+version := "0.1.2"
 
 scalaVersion := "2.12.8"
 

@@ -19,22 +19,21 @@ final case class RabbitConnectionParams(
     virtualHost: String,
     username: String,
     password: String,
-    queue: Option[RabbitQueue],
+    queue: RabbitQueue,
     exchange: Option[RabbitExchange],
     binding: Option[RabbitBinding]
-) extends MQConnectionParams {
-  require(queue.orElse(exchange).isDefined, "Either queue or exchange need to be defined")
-}
+) extends MQConnectionParams
 
 final case class RabbitQueue(
     name: String,
     durable: Boolean = true,
     exclusive: Boolean = false,
-    autoDelete: Boolean = false)
+    autoDelete: Boolean = false,
+    arguments: Map[String, AnyRef] = Map.empty)
 
 final case class RabbitExchange(name: String, exchangeType: String, durable: Boolean = true)
 
 final case class RabbitBinding(
     queue: RabbitQueue,
     exchange: RabbitExchange,
-    routingKey: String = "")
+    routingKey: Option[String] = None)
