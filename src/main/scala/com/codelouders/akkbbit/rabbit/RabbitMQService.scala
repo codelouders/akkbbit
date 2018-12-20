@@ -20,7 +20,6 @@ class RabbitMQService
     factory.setHost(connectionParams.host)
     factory.setPort(connectionParams.port)
     factory.setConnectionTimeout(connectionParams.connectionTimeout.toMillis.toInt)
-    factory.setHandshakeTimeout(connectionParams.connectionTimeout.toMillis.toInt / 2)
 
     // we do it on akka level - no need to reconnect here
     factory.setAutomaticRecoveryEnabled(false)
@@ -30,8 +29,8 @@ class RabbitMQService
     val channel = connection.createChannel()
 
     Try {
-      connectionParams.exchangeName.foreach { exchange ⇒
-        channel.exchangeDeclare(exchange, "fanout", true)
+      connectionParams.exchange.foreach { exchange ⇒
+        channel.exchangeDeclare(exchange.name, exchange.exchangeType, exchange.durable)
       }
 
       connectionParams.queue.foreach { queue ⇒
@@ -39,9 +38,8 @@ class RabbitMQService
       }
 
       for {
-        queue ← connectionParams.queue
-        exchange ← connectionParams.exchangeName
-      } yield channel.queueBind(queue.name, exchange, "")
+        binding <- connectionParams.binding
+      } yield channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
 
       RabbitMQConnection(connection, channel, connectionParams)
     }.fold(
@@ -59,7 +57,7 @@ class RabbitMQService
   //do we need channel here?
   override def send(connection: RabbitMQConnection, data: ByteString): Boolean = {
     Try {
-      val exchange = connection.connectionParams.exchangeName.getOrElse("")
+      val exchange = connection.connectionParams.exchange.map(_.name).getOrElse("")
       val queue = connection.connectionParams.queue.map(_.name).getOrElse("")
       connection.channel.basicPublish(exchange, queue, null, data.toArray)
     }.fold(

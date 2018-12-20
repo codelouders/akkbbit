@@ -20,9 +20,10 @@ final case class RabbitConnectionParams(
     username: String,
     password: String,
     queue: Option[RabbitQueue],
-    exchangeName: Option[String])
-    extends MQConnectionParams {
-  require(queue.orElse(exchangeName).isDefined, "Either queue or exchange need to be defined")
+    exchange: Option[RabbitExchange],
+    binding: Option[RabbitBinding]
+) extends MQConnectionParams {
+  require(queue.orElse(exchange).isDefined, "Either queue or exchange need to be defined")
 }
 
 final case class RabbitQueue(
@@ -30,3 +31,10 @@ final case class RabbitQueue(
     durable: Boolean = true,
     exclusive: Boolean = false,
     autoDelete: Boolean = false)
+
+final case class RabbitExchange(name: String, exchangeType: String, durable: Boolean = true)
+
+final case class RabbitBinding(
+    queue: RabbitQueue,
+    exchange: RabbitExchange,
+    routingKey: String = "")
