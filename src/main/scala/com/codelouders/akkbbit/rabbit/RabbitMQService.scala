@@ -66,12 +66,12 @@ class RabbitMQService
   override def send(connection: RabbitMQConnection, data: ByteString): Boolean = {
     Try {
       val queue = connection.connectionParams.queue.name
-      val exchange = connection.connectionParams.exchange.map(_.name).getOrElse("")
+      val exchange = connection.connectionParams.exchange.map(_.name)
       val routingKey = exchange match {
-        case "" => queue
-        case _  => connection.connectionParams.binding.flatMap(_.routingKey).getOrElse("")
+        case None => queue
+        case _    => connection.connectionParams.binding.flatMap(_.routingKey).getOrElse("")
       }
-      connection.channel.basicPublish(exchange, routingKey, null, data.toArray)
+      connection.channel.basicPublish(exchange.getOrElse(""), routingKey, null, data.toArray)
     }.fold(
       { e ⇒
         logger.error(s"Cannot connect: ${e.getMessage}", e)
