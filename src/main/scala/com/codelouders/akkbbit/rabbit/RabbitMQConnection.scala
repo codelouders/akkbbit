@@ -20,8 +20,8 @@ final case class RabbitConnectionParams(
     username: String,
     password: String,
     queue: RabbitQueue,
-    exchange: Option[RabbitExchange],
-    binding: Option[RabbitBinding]
+    exchange: Option[RabbitExchange] = None,
+    binding: Option[RabbitBinding] = None
 ) extends MQConnectionParams
 
 final case class RabbitQueue(
