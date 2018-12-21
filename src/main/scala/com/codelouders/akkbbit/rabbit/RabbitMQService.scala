@@ -67,10 +67,10 @@ class RabbitMQService
     Try {
       val queue = connection.connectionParams.queue.name
       val exchange = connection.connectionParams.exchange.map(_.name)
-      val routingKey = exchange match {
-        case None => queue
-        case _    => connection.connectionParams.binding.flatMap(_.routingKey).getOrElse("")
-      }
+      val routingKey =
+        exchange
+          .flatMap(_ => connection.connectionParams.binding.flatMap(_.routingKey))
+          .getOrElse(queue)
       connection.channel.basicPublish(exchange.getOrElse(""), routingKey, null, data.toArray)
     }.fold(
       { e ⇒
