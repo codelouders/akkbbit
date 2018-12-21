@@ -36,4 +36,4 @@ final case class RabbitExchange(name: String, exchangeType: String, durable: Boo
 final case class RabbitBinding(
     queue: RabbitQueue,
     exchange: RabbitExchange,
-    routingKey: Option[String] = None)
+    routingKey: String = "")

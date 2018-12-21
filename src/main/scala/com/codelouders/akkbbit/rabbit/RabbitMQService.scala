@@ -43,10 +43,7 @@ class RabbitMQService
       }
 
       connectionParams.binding.foreach { binding =>
-        channel.queueBind(
-          binding.queue.name,
-          binding.exchange.name,
-          binding.routingKey.getOrElse(""))
+        channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
       }
 
       RabbitMQConnection(connection, channel, connectionParams)
@@ -69,7 +66,7 @@ class RabbitMQService
       val exchange = connection.connectionParams.exchange.map(_.name)
       val routingKey =
         exchange
-          .flatMap(_ => connection.connectionParams.binding.flatMap(_.routingKey))
+          .flatMap(_ => connection.connectionParams.binding.map(_.routingKey))
           .getOrElse(queue)
       connection.channel.basicPublish(exchange.getOrElse(""), routingKey, null, data.toArray)
     }.fold(
