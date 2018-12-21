@@ -133,7 +133,7 @@ protected[akkbbit] class Producer[Params <: MQConnectionParams, Conn <: MQConnec
 
   private def updateNumberOfAttempts[T](
       buffer: Seq[RetriableMessage[T]]): Seq[RetriableMessage[T]] = {
-    logger.info(s"buffer before update attempts: $buffer")
+    logger.debug(s"buffer before update attempts: $buffer")
     buffer
       .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
   }

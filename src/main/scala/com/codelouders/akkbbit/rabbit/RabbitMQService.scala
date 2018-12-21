@@ -5,6 +5,7 @@ import com.codelouders.akkbbit.common.MQService
 import com.rabbitmq.client.ConnectionFactory
 import com.typesafe.scalalogging.LazyLogging
 
+import scala.collection.JavaConverters._
 import scala.util.Try
 
 class RabbitMQService
@@ -29,17 +30,24 @@ class RabbitMQService
     val channel = connection.createChannel()
 
     Try {
+      channel.queueDeclare(
+        connectionParams.queue.name,
+        connectionParams.queue.durable,
+        connectionParams.queue.exclusive,
+        connectionParams.queue.autoDelete,
+        connectionParams.queue.arguments.asJava
+      )
+
       connectionParams.exchange.foreach { exchange ⇒
         channel.exchangeDeclare(exchange.name, exchange.exchangeType, exchange.durable)
       }
 
-      connectionParams.queue.foreach { queue ⇒
-        channel.queueDeclare(queue.name, queue.durable, queue.exclusive, queue.autoDelete, null)
+      connectionParams.binding.foreach { binding =>
+        channel.queueBind(
+          binding.queue.name,
+          binding.exchange.name,
+          binding.routingKey.getOrElse(""))
       }
-
-      for {
-        binding <- connectionParams.binding
-      } yield channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
 
       RabbitMQConnection(connection, channel, connectionParams)
     }.fold(
@@ -57,9 +65,13 @@ class RabbitMQService
   //do we need channel here?
   override def send(connection: RabbitMQConnection, data: ByteString): Boolean = {
     Try {
-      val exchange = connection.connectionParams.exchange.map(_.name).getOrElse("")
-      val queue = connection.connectionParams.queue.map(_.name).getOrElse("")
-      connection.channel.basicPublish(exchange, queue, null, data.toArray)
+      val queue = connection.connectionParams.queue.name
+      val exchange = connection.connectionParams.exchange.map(_.name)
+      val routingKey =
+        exchange
+          .flatMap(_ => connection.connectionParams.binding.flatMap(_.routingKey))
+          .getOrElse(queue)
+      connection.channel.basicPublish(exchange.getOrElse(""), routingKey, null, data.toArray)
     }.fold(
       { e ⇒
         logger.error(s"Cannot connect: ${e.getMessage}", e)
