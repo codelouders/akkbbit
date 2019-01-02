@@ -1,28 +1,27 @@
-package com.codelouders.akkbbit.rabbit
+package com.codelouders.akkbbit.common
 
-import com.codelouders.akkbbit.common.{MQConnection, MQConnectionParams}
 import com.rabbitmq.client.Channel
 import com.rabbitmq.client.Connection
 
 import scala.concurrent.duration.FiniteDuration
 
-final case class RabbitMQConnection(
+final case class ActiveConnection(
     connection: Connection,
     channel: Channel,
-    connectionParams: RabbitConnectionParams)
-    extends MQConnection
+    connectionParams: RabbitChannel)
 
-final case class RabbitConnectionParams(
+final case class ConnectionParams(
     host: String,
     port: Int,
     connectionTimeout: FiniteDuration,
     virtualHost: String,
     username: String,
-    password: String,
+    password: String)
+
+final case class RabbitChannel(
     queue: RabbitQueue,
     exchange: Option[RabbitExchange] = None,
-    binding: Option[RabbitBinding] = None
-) extends MQConnectionParams
+    binding: Option[RabbitBinding] = None)
 
 final case class RabbitQueue(
     name: String,
