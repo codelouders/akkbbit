@@ -4,7 +4,7 @@ import akka.NotUsed
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
-import com.codelouders.akkbbit.common.ControlMsg.GetCurrentConnection
+import com.codelouders.akkbbit.common.ControlMsg.GetConnection
 import com.codelouders.akkbbit.common._
 import com.codelouders.akkbbit.producer.IncomingMessage.{
   ConnectionInfo,
@@ -101,7 +101,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
       .alsoTo {
         Flow[OutboundMessage[T]]
           .collect {
-            case Reconnect ⇒ GetCurrentConnection(true)
+            case Reconnect ⇒ GetConnection
           }
           .to(connectionProvider.controlIn)
       }

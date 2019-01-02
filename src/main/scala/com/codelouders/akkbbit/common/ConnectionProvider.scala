@@ -3,7 +3,7 @@ package com.codelouders.akkbbit.common
 import akka.NotUsed
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, Sink, Source}
-import com.codelouders.akkbbit.common.ControlMsg.GetCurrentConnection
+import com.codelouders.akkbbit.common.ControlMsg.GetConnection
 import com.codelouders.akkbbit.common.RabbitConnection.NotConnected
 import com.codelouders.akkbbit.rabbit.RabbitService
 import com.typesafe.scalalogging.LazyLogging
@@ -38,10 +38,10 @@ class ConnectionProvider(connectionParams: ConnectionParams, rabbitService: Rabb
         var connection = rabbitService.connect(connectionParams)
 
         {
-          case GetCurrentConnection(reconnect) ⇒
+          case GetConnection ⇒
             if (connection.exists(_.isOpen))
               Seq(RabbitConnection.Connected(connection.get))
-            else if (reconnect) {
+            else {
               connection = rabbitService.connect(connectionParams)
 
               Seq(
@@ -51,8 +51,6 @@ class ConnectionProvider(connectionParams: ConnectionParams, rabbitService: Rabb
                   }
                   .getOrElse(RabbitConnection.NotConnected))
             }
-            else
-              Seq(NotConnected)
         }
       }
   }

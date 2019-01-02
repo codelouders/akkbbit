@@ -9,5 +9,5 @@ private[akkbbit] object RabbitConnection {
 
 private[akkbbit] trait ControlMsg
 private[akkbbit] object ControlMsg {
-  private[akkbbit] case class GetCurrentConnection(reconnection: Boolean = true) extends ControlMsg
+  private[akkbbit] case object GetConnection extends ControlMsg
 }
