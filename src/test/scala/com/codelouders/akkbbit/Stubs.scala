@@ -26,7 +26,7 @@ class StubService extends RabbitService with LazyLogging {
 
   override def setUpChannel(
       connection: RabbitConnection,
-      connectionParams: RabbitChannel): Option[ActiveConnection] = {
+      connectionParams: RabbitChannelConfig): Option[ActiveConnection] = {
     logger.info(s"[connect] reconnect: $reconnect")
     isAliveState = reconnect
     if (isAliveState)

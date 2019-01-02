@@ -4,7 +4,7 @@ import akka.util.ByteString
 import com.codelouders.akkbbit.common.{
   ActiveConnection,
   ConnectionParams,
-  RabbitChannel,
+  RabbitChannelConfig,
   RabbitConnection
 }
 import com.rabbitmq.client.{Connection, ConnectionFactory}
@@ -39,7 +39,7 @@ class RabbitService extends LazyLogging {
 
   def setUpChannel(
       rabbitConn: RabbitConnection,
-      connectionParams: RabbitChannel): Option[ActiveConnection] = {
+      channelConfig: RabbitChannelConfig): Option[ActiveConnection] = {
 
     rabbitConn match {
 
@@ -48,22 +48,22 @@ class RabbitService extends LazyLogging {
 
         Try {
           channel.queueDeclare(
-            connectionParams.queue.name,
-            connectionParams.queue.durable,
-            connectionParams.queue.exclusive,
-            connectionParams.queue.autoDelete,
-            connectionParams.queue.arguments.asJava
+            channelConfig.queue.name,
+            channelConfig.queue.durable,
+            channelConfig.queue.exclusive,
+            channelConfig.queue.autoDelete,
+            channelConfig.queue.arguments.asJava
           )
 
-          connectionParams.exchange.foreach { exchange ⇒
+          channelConfig.exchange.foreach { exchange ⇒
             channel.exchangeDeclare(exchange.name, exchange.exchangeType, exchange.durable)
           }
 
-          connectionParams.binding.foreach { binding =>
+          channelConfig.binding.foreach { binding =>
             channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
           }
 
-          ActiveConnection(connection, channel, connectionParams)
+          ActiveConnection(connection, channel, channelConfig)
         }.fold(
           { e ⇒
             logger.error(s"Cannot connect: ${e.getMessage}", e)

@@ -8,7 +8,7 @@ import scala.concurrent.duration.FiniteDuration
 final case class ActiveConnection(
     connection: Connection,
     channel: Channel,
-    connectionParams: RabbitChannel)
+    connectionParams: RabbitChannelConfig)
 
 final case class ConnectionParams(
     host: String,
@@ -18,21 +18,21 @@ final case class ConnectionParams(
     username: String,
     password: String)
 
-final case class RabbitChannel(
-    queue: RabbitQueue,
-    exchange: Option[RabbitExchange] = None,
-    binding: Option[RabbitBinding] = None)
+final case class RabbitChannelConfig(
+    queue: RabbitQueueConfig,
+    exchange: Option[RabbitExchangeConfig] = None,
+    binding: Option[RabbitBindingConfig] = None)
 
-final case class RabbitQueue(
+final case class RabbitQueueConfig(
     name: String,
     durable: Boolean = true,
     exclusive: Boolean = false,
     autoDelete: Boolean = false,
     arguments: Map[String, AnyRef] = Map.empty)
 
-final case class RabbitExchange(name: String, exchangeType: String, durable: Boolean = true)
+final case class RabbitExchangeConfig(name: String, exchangeType: String, durable: Boolean = true)
 
-final case class RabbitBinding(
-    queue: RabbitQueue,
-    exchange: RabbitExchange,
+final case class RabbitBindingConfig(
+    queue: RabbitQueueConfig,
+    exchange: RabbitExchangeConfig,
     routingKey: String = "")

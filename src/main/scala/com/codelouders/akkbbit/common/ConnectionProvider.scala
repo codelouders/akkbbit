@@ -10,6 +10,15 @@ import com.typesafe.scalalogging.LazyLogging
 
 import scala.collection.immutable.Seq
 
+/**
+  * New instance of this class = new connection to rabbit.
+  * Instance can and should be reuse as long as we want to connect to the same rabbit.
+  * Flow/sink will create it's own separate channel (see rabbit java client docs for more info)
+  *
+  * @param connectionParams
+  * @param rabbitService
+  * @param am
+  */
 class ConnectionProvider(connectionParams: ConnectionParams, rabbitService: RabbitService)(
     implicit am: ActorMaterializer)
     extends LazyLogging {

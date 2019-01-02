@@ -8,7 +8,7 @@ import akka.stream._
 import akka.stream.scaladsl.{BroadcastHub, Keep, MergeHub, Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
-import com.codelouders.akkbbit.common.{RabbitChannel, RabbitQueue}
+import com.codelouders.akkbbit.common.{RabbitChannelConfig, RabbitQueueConfig}
 import com.codelouders.akkbbit.producer.IncomingMessage.ReconnectionTick
 import com.codelouders.akkbbit.producer.{AkkbbitProducer, IncomingMessage}
 import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
@@ -20,7 +20,7 @@ import scala.concurrent.duration._
 
 class ProducerFlowTest extends FlatSpec with Matchers {
 
-  val connectionParams = RabbitChannel(RabbitQueue(""), None, None)
+  val connectionParams = RabbitChannelConfig(RabbitQueueConfig(""), None, None)
 
   "Producer flow" should "send messages successfully when connected" in {
     implicit val as: ActorSystem = ActorSystem(s"test-${UUID.randomUUID()}")
@@ -37,7 +37,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams
+      channelConfig = connectionParams
     )
 
     val (inQueue, probe) = Source
@@ -231,7 +231,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams,
+      channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
       reconnectInterval = 1 second,
@@ -293,7 +293,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams,
+      channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
       reconnectInterval = 1 second,
@@ -356,7 +356,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams,
+      channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
       reconnectInterval = 1 second,
@@ -419,7 +419,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams,
+      channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
       reconnectInterval = 1 second,
@@ -476,7 +476,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val flow = producer.createFlow(
       serializer = (a: String) ⇒ ByteString(a),
-      connectionParams = connectionParams,
+      channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 2,
       reconnectInterval = 1 second,

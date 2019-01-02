@@ -34,7 +34,7 @@ trait ProducerFlow {
     */
   def createFlow[T](
       serializer: T ⇒ ByteString,
-      connectionParams: RabbitChannel,
+      channelConfig: RabbitChannelConfig,
       maxRetries: Int = 0,
       maxBufferSize: Int = 2048,
       reconnectInterval: FiniteDuration = 1 second,
@@ -54,7 +54,7 @@ trait ProducerSink {
     */
   def createSink[T](
       serializer: T ⇒ ByteString,
-      connectionParams: RabbitChannel,
+      channelConfig: RabbitChannelConfig,
       maxBufferSize: Int = 2048,
       reconnectInterval: FiniteDuration = 1 second): Sink[T, NotUsed]
 }
@@ -78,7 +78,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
 
   override def createFlow[T](
       serializer: T ⇒ ByteString,
-      connectionParams: RabbitChannel,
+      channelConfig: RabbitChannelConfig,
       maxRetries: Int = 0,
       maxBufferSize: Int = 2048,
       reconnectInterval: FiniteDuration = 1 second,
@@ -92,7 +92,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
     Flow[T].async
       .via(stateFlow[T](
         serializer = serializer,
-        connectionParams = connectionParams,
+        connectionParams = channelConfig,
         reconnectInterval = reconnectInterval,
         maxRetries = maxRetries,
         maxBufferSize = maxBufferSize,
@@ -112,14 +112,14 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
 
   override def createSink[T](
       serializer: T ⇒ ByteString,
-      connectionParams: RabbitChannel,
+      channelConfig: RabbitChannelConfig,
       maxBufferSize: Int = 2048,
       reconnectInterval: FiniteDuration = 1 second): Sink[T, NotUsed] =
     MergeHub
       .source[T](256)
       .via(createFlow(
         serializer = serializer,
-        connectionParams = connectionParams,
+        channelConfig = channelConfig,
         maxRetries = Int.MaxValue,
         maxBufferSize = maxBufferSize,
         reconnectInterval = reconnectInterval,
@@ -130,7 +130,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
 
   private def stateFlow[T](
       serializer: T ⇒ ByteString,
-      connectionParams: RabbitChannel,
+      connectionParams: RabbitChannelConfig,
       reconnectInterval: FiniteDuration,
       maxRetries: Int,
       maxBufferSize: Int,
