@@ -25,12 +25,6 @@ private[akkbbit] object IncomingMessage {
   case object RetryTick extends IncomingMessage[Nothing]
 }
 
-//private[akkbbit] trait OutboundMessage[+T]
-//private[akkbbit] object OutboundMessage {
-//  final case class Result[T](resultMsg: PassThroughStatusMessage[T]) extends OutboundMessage[T]
-//  case object Reconnect extends OutboundMessage[Nothing]
-//}
-
 private[akkbbit] case class RetriableMessage[T](attemptsCounter: Int, message: T)
 
 private[akkbbit] case class SendResult[T](
