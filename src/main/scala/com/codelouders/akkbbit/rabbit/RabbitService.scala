@@ -5,7 +5,7 @@ import com.codelouders.akkbbit.common.{
   ActiveConnection,
   ConnectionParams,
   RabbitChannelConfig,
-  RabbitConnection
+  ConnectionUpdate
 }
 import com.rabbitmq.client.{Connection, ConnectionFactory}
 import com.typesafe.scalalogging.LazyLogging
@@ -38,12 +38,12 @@ class RabbitService extends LazyLogging {
   }
 
   def setUpChannel(
-      rabbitConn: RabbitConnection,
+      rabbitConn: ConnectionUpdate,
       channelConfig: RabbitChannelConfig): Option[ActiveConnection] = {
 
     rabbitConn match {
 
-      case RabbitConnection.Connected(connection) ⇒
+      case ConnectionUpdate.Connected(connection) ⇒
         val channel = connection.createChannel()
 
         Try {
@@ -72,7 +72,7 @@ class RabbitService extends LazyLogging {
           Some(_)
         )
 
-      case RabbitConnection.NotConnected ⇒ None
+      case ConnectionUpdate.NotConnected ⇒ None
     }
   }
 

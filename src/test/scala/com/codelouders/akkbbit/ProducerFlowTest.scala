@@ -9,7 +9,7 @@ import akka.stream.scaladsl.{BroadcastHub, Keep, MergeHub, Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
 import com.codelouders.akkbbit.common.{RabbitChannelConfig, RabbitQueueConfig}
-import com.codelouders.akkbbit.producer.IncomingMessage.ReconnectionTick
+import com.codelouders.akkbbit.producer.IncomingMessage.RetryTick
 import com.codelouders.akkbbit.producer.{AkkbbitProducer, IncomingMessage}
 import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
 import com.codelouders.akkbbit.producer.SentStatus.{FailedToSent, MessageSent}
@@ -28,11 +28,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -47,8 +47,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-
+    connectionProvider.updateConnection
     probe.request(1).expectNoMessage(100 millis)
 
     inQueue.offer("a")
@@ -75,11 +74,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow((a: String) ⇒ ByteString(a), connectionParams, 1)
@@ -92,8 +91,8 @@ class ProducerFlowTest extends FlatSpec with Matchers {
         .toMat(TestSink.probe)(Keep.both)
         .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
+    connectionProvider.updateConnection
+    probe.request(1).expectNoMessage(50 millis)
 
     inQueue.offer("a")
     var out = probe.requestNext()
@@ -105,7 +104,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
     inQueue.offer("c")
 
     probe.request(2).expectNoMessage(50 millis)
-    Source.single(ReconnectionTick).runWith(inTicks)
+    connectionProvider.updateConnection
 
     val Seq(el1, el2) = probe.request(2).expectNextN(2)
     el1.message shouldBe "b"
@@ -128,11 +127,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow((a: String) ⇒ ByteString(a), connectionParams)
@@ -143,11 +142,6 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .via(killSwitch.flow)
       .toMat(TestSink.probe)(Keep.both)
       .run()
-
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
 
     incoming.offer("a")
     incoming.offer("b")
@@ -172,11 +166,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow((a: String) ⇒ ByteString(a), connectionParams, 2)
@@ -188,11 +182,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
-    service.reconnect = false
+    probe.request(1).expectNoMessage(50 millis)
 
     incoming.offer("a")
     incoming.offer("b")
@@ -200,9 +190,9 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     probe.request(3).expectNoMessage(50 millis)
 
-    Source.single(ReconnectionTick).runWith(inTicks)
+    Source.single(RetryTick).runWith(inTicks)
     probe.request(3).expectNoMessage(50 millis)
-    Source.single(ReconnectionTick).runWith(inTicks)
+    Source.single(RetryTick).runWith(inTicks)
     val Seq(el1, el2, el3) = probe.request(3).expectNextN(3)
 
     el1.message shouldBe "a"
@@ -222,11 +212,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (_, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -234,7 +224,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
-      reconnectInterval = 1 second,
+      retryInterval = 1 second,
       overflowStrategy = OverflowStrategy.dropNew
     )
 
@@ -245,10 +235,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
+    probe.request(1).expectNoMessage(50 millis)
 
     incoming.offer("a") // 1
     incoming.offer("b") // 2
@@ -257,9 +244,9 @@ class ProducerFlowTest extends FlatSpec with Matchers {
     incoming.offer("e") // 5
     incoming.offer("f") // 6 should be dropped
 
-    probe.request(3).expectNoMessage(50 millis)
+    probe.request(6).expectNoMessage(50 millis)
 
-    Source.single(ReconnectionTick).runWith(inTicks)
+    connectionProvider.updateConnection
 
     val Seq(el1, el2, el3, el4, el5) = probe.request(6).expectNextN(5)
 
@@ -284,11 +271,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (_, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -296,7 +283,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
-      reconnectInterval = 1 second,
+      retryInterval = 1 second,
       overflowStrategy = OverflowStrategy.dropHead
     )
 
@@ -307,10 +294,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
+    probe.request(1).expectNoMessage(50 millis)
 
     incoming.offer("a") // 1 // should be dropped and f should get in
     incoming.offer("b") // 2 // should be dropped and g should get in
@@ -320,9 +304,8 @@ class ProducerFlowTest extends FlatSpec with Matchers {
     incoming.offer("f") // 6
     incoming.offer("g") // 7
 
-    probe.request(3).expectNoMessage(50 millis)
-
-    Source.single(ReconnectionTick).runWith(inTicks)
+    probe.request(7).expectNoMessage(50 millis)
+    connectionProvider.updateConnection
 
     val Seq(el1, el2, el3, el4, el5) = probe.request(7).expectNextN(5)
 
@@ -347,11 +330,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (_, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -359,7 +342,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
-      reconnectInterval = 1 second,
+      retryInterval = 1 second,
       overflowStrategy = OverflowStrategy.dropTail
     )
 
@@ -370,10 +353,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
     probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
 
     incoming.offer("a") // 1
     incoming.offer("b") // 2
@@ -383,9 +363,8 @@ class ProducerFlowTest extends FlatSpec with Matchers {
     incoming.offer("f") // 6 // should be dropped and g should get in
     incoming.offer("g") // 7
 
-    probe.request(3).expectNoMessage(50 millis)
-
-    Source.single(ReconnectionTick).runWith(inTicks)
+    probe.request(7).expectNoMessage(50 millis)
+    connectionProvider.updateConnection
 
     val Seq(el1, el2, el3, el4, el5) = probe.request(7).expectNextN(5)
 
@@ -410,11 +389,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -422,7 +401,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 5,
-      reconnectInterval = 1 second,
+      retryInterval = 1 second,
       overflowStrategy = OverflowStrategy.dropBuffer
     )
 
@@ -433,22 +412,18 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
     probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
 
     incoming.offer("a") // 1
     incoming.offer("b") // 2
     incoming.offer("c") // 3
     incoming.offer("d") // 4
     incoming.offer("e") // 5
-    incoming.offer("f") // 6 // it should drop all above messages
+    incoming.offer("f") // 6 // it should drop all the above messages
     incoming.offer("g") // 7
 
-    probe.request(3).expectNoMessage(50 millis)
-
-    Source.single(ReconnectionTick).runWith(inTicks)
+    probe.request(7).expectNoMessage(50 millis)
+    connectionProvider.updateConnection
 
     val Seq(el1, el2) = probe.request(7).expectNextN(2)
 
@@ -467,11 +442,11 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
     val killSwitch: SharedKillSwitch = KillSwitches.shared("test-flow-kill-switch")
 
-    val (inTicks, outTicks) = crateTickStream(killSwitch)
+    val (inTicks, outTicks) = crateRetryStream(killSwitch)
 
     val service = new StubService
 
-    val producer =
+    val (producer, connectionProvider) =
       createProducer(service = service, outTicks = outTicks)
 
     val flow = producer.createFlow(
@@ -479,7 +454,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       channelConfig = connectionParams,
       maxRetries = 10,
       maxBufferSize = 2,
-      reconnectInterval = 1 second,
+      retryInterval = 1 second,
       overflowStrategy = OverflowStrategy.fail
     )
 
@@ -490,10 +465,7 @@ class ProducerFlowTest extends FlatSpec with Matchers {
       .toMat(TestSink.probe)(Keep.both)
       .run()
 
-    Source.single(ReconnectionTick).runWith(inTicks)
-    probe.request(1).expectNoMessage(100 millis)
-
-    service.disconnect()
+    probe.request(1).expectNoMessage(50 millis)
 
     incoming.offer("a") // 1
     incoming.offer("b") // 2
@@ -507,23 +479,24 @@ class ProducerFlowTest extends FlatSpec with Matchers {
 
   private def createProducer(
       service: StubService,
-      outTicks: Source[IncomingMessage.ReconnectionTick.type, NotUsed])(
-      implicit am: ActorMaterializer): AkkbbitProducer = {
+      outTicks: Source[IncomingMessage.RetryTick.type, NotUsed])(
+      implicit am: ActorMaterializer): (AkkbbitProducer, StubConnectionProvider) = {
 
-    new AkkbbitProducer(service, new StubConnectionProvider(service)) {
-      override protected def tickingSource(
-          f: FiniteDuration): Source[ReconnectionTick.type, NotUsed] = {
+    val connectionProvider = new StubConnectionProvider(service)
+
+    (new AkkbbitProducer(service, connectionProvider) {
+      override protected def tickingSource(f: FiniteDuration): Source[RetryTick.type, NotUsed] = {
         outTicks
       }
-    }
+    }, connectionProvider)
   }
 
-  private def crateTickStream(killSwitch: SharedKillSwitch)(implicit am: ActorMaterializer): (
-      Sink[IncomingMessage.ReconnectionTick.type, NotUsed],
-      Source[IncomingMessage.ReconnectionTick.type, NotUsed]) = {
+  private def crateRetryStream(killSwitch: SharedKillSwitch)(implicit am: ActorMaterializer): (
+      Sink[IncomingMessage.RetryTick.type, NotUsed],
+      Source[IncomingMessage.RetryTick.type, NotUsed]) = {
 
     MergeHub
-      .source[ReconnectionTick.type](8)
+      .source[RetryTick.type](8)
       .via(killSwitch.flow)
       .toMat(BroadcastHub.sink(8))(Keep.both)
       .run()

@@ -4,14 +4,8 @@ import akka.NotUsed
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
-import com.codelouders.akkbbit.common.ControlMsg.GetConnection
 import com.codelouders.akkbbit.common._
-import com.codelouders.akkbbit.producer.IncomingMessage.{
-  ConnectionInfo,
-  MessageToSend,
-  ReconnectionTick
-}
-import com.codelouders.akkbbit.producer.OutboundMessage.{Reconnect, Result}
+import com.codelouders.akkbbit.producer.IncomingMessage.{ConnectionInfo, MessageToSend, RetryTick}
 import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
 import com.codelouders.akkbbit.producer.SentStatus.{FailedToSent, MessageSent}
 import com.codelouders.akkbbit.rabbit.RabbitService
@@ -56,7 +50,7 @@ trait ProducerSink {
       serializer: T ⇒ ByteString,
       channelConfig: RabbitChannelConfig,
       maxBufferSize: Int = 2048,
-      reconnectInterval: FiniteDuration = 1 second): Sink[T, NotUsed]
+      retryInterval: FiniteDuration = 1 second): Sink[T, NotUsed]
 }
 
 /**
@@ -81,7 +75,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
       channelConfig: RabbitChannelConfig,
       maxRetries: Int = 0,
       maxBufferSize: Int = 2048,
-      reconnectInterval: FiniteDuration = 1 second,
+      retryInterval: FiniteDuration = 1 second,
       overflowStrategy: OverflowStrategy = OverflowStrategy.dropHead)
     : Flow[T, PassThroughStatusMessage[T], NotUsed] = {
 
@@ -90,31 +84,22 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
       "Backpressure strategy is not supported")
 
     Flow[T].async
-      .via(stateFlow[T](
-        serializer = serializer,
-        connectionParams = channelConfig,
-        reconnectInterval = reconnectInterval,
-        maxRetries = maxRetries,
-        maxBufferSize = maxBufferSize,
-        overflowStrategy = overflowStrategy
-      ))
-      .alsoTo {
-        Flow[OutboundMessage[T]]
-          .collect {
-            case Reconnect ⇒ GetConnection
-          }
-          .to(connectionProvider.controlIn)
-      }
-      .collect {
-        case Result(res) ⇒ res
-      }
+      .via(
+        stateFlow[T](
+          serializer = serializer,
+          connectionParams = channelConfig,
+          retryInterval = retryInterval,
+          maxRetries = maxRetries,
+          maxBufferSize = maxBufferSize,
+          overflowStrategy = overflowStrategy
+        ))
   }
 
   override def createSink[T](
       serializer: T ⇒ ByteString,
       channelConfig: RabbitChannelConfig,
       maxBufferSize: Int = 2048,
-      reconnectInterval: FiniteDuration = 1 second): Sink[T, NotUsed] =
+      retryInterval: FiniteDuration = 1 second): Sink[T, NotUsed] =
     MergeHub
       .source[T](256)
       .via(createFlow(
@@ -122,7 +107,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
         channelConfig = channelConfig,
         maxRetries = Int.MaxValue,
         maxBufferSize = maxBufferSize,
-        reconnectInterval = reconnectInterval,
+        retryInterval = retryInterval,
         overflowStrategy = OverflowStrategy.dropHead
       ))
       .to(Sink.ignore)
@@ -131,15 +116,16 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
   private def stateFlow[T](
       serializer: T ⇒ ByteString,
       connectionParams: RabbitChannelConfig,
-      reconnectInterval: FiniteDuration,
+      retryInterval: FiniteDuration,
       maxRetries: Int,
       maxBufferSize: Int,
-      overflowStrategy: OverflowStrategy): Flow[T, OutboundMessage[T], NotUsed] =
+      overflowStrategy: OverflowStrategy): Flow[T, PassThroughStatusMessage[T], NotUsed] = {
+
     Flow[T]
       .map(MessageToSend(_))
-      .merge(tickingSource(reconnectInterval).async)
-      .merge(connectionProvider.connectionOut.map(ConnectionInfo).async)
-      .statefulMapConcat[OutboundMessage[T]] { () ⇒
+      .merge(tickingSource(retryInterval).async)
+      .merge(connectionProvider.connectionUpdateSource.map(ConnectionInfo).async)
+      .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
         var connection: Option[ActiveConnection] = None
         var buffer = Seq.empty[RetriableMessage[T]]
 
@@ -148,7 +134,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
           val returnState = send(buffer, conn, maxRetries, serializer)
           logger.debug(s"Messages saved for another retry: ${returnState.newBuffer}")
           buffer = returnState.newBuffer
-          returnState.output.map(Result(_))
+          returnState.output
         }
 
         def tooManyAttempts(list: Seq[RetriableMessage[T]]) = {
@@ -157,18 +143,18 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
           buffer = updatedBuffer
           logger.debug(s"Messages saved for retry: $updatedBuffer")
           logger.debug(s"Failed to sent(too many attempts): $tooManyAttempts")
-          tooManyAttempts.map(wrapIntoTooManyAttemptsMessage(maxRetries)).map(Result(_))
+          tooManyAttempts.map(wrapIntoTooManyAttemptsMessage(maxRetries))
         }
 
         {
-          case ReconnectionTick ⇒
+          case RetryTick ⇒
             logger.debug("ReconnectionTick")
 
             connection match {
               case Some(conn) if connection.exists(rabbitService.isAlive) ⇒
                 trySend(conn)
               case _ ⇒
-                Seq(Reconnect)
+                tooManyAttempts(incNumberOfAttempts(buffer))
             }
 
           case ConnectionInfo(newConn) ⇒
@@ -177,7 +163,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
               case Some(conn) if rabbitService.isAlive(conn) ⇒
                 trySend(conn)
               case _ ⇒
-                tooManyAttempts(incNumberOfAttempts(buffer))
+                Seq.empty
             }
 
           case MessageToSend(msg) ⇒
@@ -196,11 +182,11 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
         }
       }
       .async
+  }
 
-  protected def tickingSource(
-      reconnectInterval: FiniteDuration): Source[ReconnectionTick.type, NotUsed] =
+  protected def tickingSource(reconnectInterval: FiniteDuration): Source[RetryTick.type, NotUsed] =
     Source
-      .tick(0 millis, reconnectInterval, ReconnectionTick)
+      .tick(0 millis, reconnectInterval, RetryTick)
       .mapMaterializedValue(_ ⇒ NotUsed)
 
   private def incNumberOfAttempts[T](buffer: Seq[RetriableMessage[T]]): Seq[RetriableMessage[T]] = {

@@ -4,11 +4,12 @@ import akka.NotUsed
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, Sink, Source}
 import com.codelouders.akkbbit.common.ControlMsg.GetConnection
-import com.codelouders.akkbbit.common.RabbitConnection.NotConnected
 import com.codelouders.akkbbit.rabbit.RabbitService
 import com.typesafe.scalalogging.LazyLogging
 
 import scala.collection.immutable.Seq
+import scala.concurrent.duration._
+import scala.concurrent.duration.FiniteDuration
 
 /**
   * New instance of this class = new connection to rabbit.
@@ -19,20 +20,30 @@ import scala.collection.immutable.Seq
   * @param rabbitService
   * @param am
   */
-class ConnectionProvider(connectionParams: ConnectionParams, rabbitService: RabbitService)(
-    implicit am: ActorMaterializer)
+class ConnectionProvider(
+    connectionParams: ConnectionParams,
+    rabbitService: RabbitService,
+    reconnectInterval: FiniteDuration)(implicit am: ActorMaterializer)
     extends LazyLogging {
 
-  private[akkbbit] lazy val (
+  protected lazy val (
     controlIn: Sink[ControlMsg, NotUsed],
-    connectionOut: Source[RabbitConnection, NotUsed]) =
+    connectionOut: Source[ConnectionUpdate, NotUsed]) =
     MergeHub
       .source[ControlMsg](8)
+      .merge(Source.tick(0 seconds, reconnectInterval, GetConnection), true)
       .viaMat(connectionStateFlow)(Keep.left)
       .toMat(BroadcastHub.sink(8))(Keep.both)
       .run()
 
-  private def connectionStateFlow: Flow[ControlMsg, RabbitConnection, NotUsed] = {
+  def connectionUpdateSource: Source[ConnectionUpdate, NotUsed] =
+    connectionOut
+
+  def forceRefresh: Unit = {
+    Source.single(GetConnection).runWith(controlIn)
+  }
+
+  private def connectionStateFlow: Flow[ControlMsg, ConnectionUpdate, NotUsed] = {
     Flow[ControlMsg]
       .statefulMapConcat { () ⇒
         var connection = rabbitService.connect(connectionParams)
@@ -40,16 +51,16 @@ class ConnectionProvider(connectionParams: ConnectionParams, rabbitService: Rabb
         {
           case GetConnection ⇒
             if (connection.exists(_.isOpen))
-              Seq(RabbitConnection.Connected(connection.get))
+              Seq(ConnectionUpdate.Connected(connection.get))
             else {
               connection = rabbitService.connect(connectionParams)
 
               Seq(
                 connection
                   .map { conn ⇒
-                    RabbitConnection.Connected(conn)
+                    ConnectionUpdate.Connected(conn)
                   }
-                  .getOrElse(RabbitConnection.NotConnected))
+                  .getOrElse(ConnectionUpdate.NotConnected))
             }
         }
       }
