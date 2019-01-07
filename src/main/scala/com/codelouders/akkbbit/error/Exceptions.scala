@@ -1,5 +1,5 @@
 package com.codelouders.akkbbit.error
 
-class AkkbbitException(msg: String, cause: Option[Exception]) extends Exception(msg, cause.orNull) {
-  def this(msg: String) = this(msg, None)
-}
+class AkkbbitException(cause: Exception) extends Exception(cause)
+
+case class SerialisationException(cause: Exception) extends AkkbbitException(cause)

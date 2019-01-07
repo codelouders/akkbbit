@@ -1,6 +1,7 @@
 package com.codelouders.akkbbit.producer
 
 import com.codelouders.akkbbit.common.ConnectionUpdate
+import com.codelouders.akkbbit.error.SerialisationException
 
 import scala.collection.immutable.Seq
 
@@ -15,6 +16,7 @@ object SentStatus {
 sealed trait SentError
 object SentError {
   final case class TooManyAttempts(numberOfAttempts: Int, threshold: Int) extends SentError
+  final case class SerialisationError(cause: SerialisationException) extends SentError
 }
 
 private[akkbbit] trait IncomingMessage[+T]
@@ -27,6 +29,6 @@ private[akkbbit] object IncomingMessage {
 
 private[akkbbit] case class RetriableMessage[T](attemptsCounter: Int, message: T)
 
-private[akkbbit] case class SendResult[T](
+private[akkbbit] case class ProducerResult[T](
     output: Seq[PassThroughStatusMessage[T]],
-    newBuffer: Seq[RetriableMessage[T]])
+    updatedBuffer: Seq[RetriableMessage[T]])

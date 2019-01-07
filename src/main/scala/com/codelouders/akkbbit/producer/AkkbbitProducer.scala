@@ -6,8 +6,6 @@ import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
 import com.codelouders.akkbbit.common._
 import com.codelouders.akkbbit.producer.IncomingMessage.{ConnectionInfo, MessageToSend, RetryTick}
-import com.codelouders.akkbbit.producer.SentError.TooManyAttempts
-import com.codelouders.akkbbit.producer.SentStatus.{FailedToSent, MessageSent}
 import com.codelouders.akkbbit.rabbit.RabbitService
 import com.typesafe.scalalogging.LazyLogging
 
@@ -128,57 +126,50 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
       .statefulMapConcat[PassThroughStatusMessage[T]] { () ⇒
         var connection: Option[ActiveConnection] = None
         var buffer = Seq.empty[RetriableMessage[T]]
-
-        def trySend(conn: ActiveConnection) = {
-          logger.debug(s"Messages to send: $buffer")
-          val returnState = send(buffer, conn, maxRetries, serializer)
-          logger.debug(s"Messages saved for another retry: ${returnState.newBuffer}")
-          buffer = returnState.newBuffer
-          returnState.output
-        }
-
-        def tooManyAttempts(list: Seq[RetriableMessage[T]]) = {
-          val (tooManyAttempts, updatedBuffer) =
-            spitByAttempts(list, maxRetries)
-          buffer = updatedBuffer
-          logger.debug(s"Messages saved for retry: $updatedBuffer")
-          logger.debug(s"Failed to sent(too many attempts): $tooManyAttempts")
-          tooManyAttempts.map(wrapIntoTooManyAttemptsMessage(maxRetries))
-        }
+        val producerStateService =
+          new ProducerStateService[T](
+            rabbitService = rabbitService,
+            serializer = serializer,
+            maxRetries = maxRetries,
+            maxBufferSize = maxBufferSize,
+            overflowStrategy = overflowStrategy)
 
         {
           case RetryTick ⇒
             logger.debug("ReconnectionTick")
-
-            connection match {
-              case Some(conn) if connection.exists(rabbitService.isAlive) ⇒
-                trySend(conn)
+            val result = connection match {
+              case Some(conn) if rabbitService.isAlive(conn) ⇒
+                producerStateService.send(buffer, conn)
               case _ ⇒
-                tooManyAttempts(incNumberOfAttempts(buffer))
+                producerStateService.detectTooManyAttempts(
+                  producerStateService.incNumberOfAttempts(buffer))
             }
+            buffer = result.updatedBuffer
+            result.output
 
           case ConnectionInfo(newConn) ⇒
             connection = rabbitService.setUpChannel(newConn, connectionParams)
             connection match {
               case Some(conn) if rabbitService.isAlive(conn) ⇒
-                trySend(conn)
+                val result = producerStateService.send(buffer, conn)
+                buffer = result.updatedBuffer
+                result.output
               case _ ⇒
                 Seq.empty
             }
 
           case MessageToSend(msg) ⇒
-            if (buffer.size + 1 > maxBufferSize)
-              buffer = BufferOverflowExecutor.executeStrategy(buffer, msg, overflowStrategy)
-            else
-              buffer = buffer :+ RetriableMessage(attemptsCounter = 0, message = msg)
+            buffer = producerStateService.addNewMessageToBuffer(buffer, msg)
 
-            connection match {
+            val result = connection match {
               case Some(conn) if rabbitService.isAlive(conn) ⇒
-                trySend(conn)
+                producerStateService.send(buffer, conn)
               case _ ⇒
                 buffer = buffer.updated(buffer.size - 1, buffer.last.copy(attemptsCounter = 1))
-                tooManyAttempts(buffer)
+                producerStateService.detectTooManyAttempts(buffer)
             }
+            buffer = result.updatedBuffer
+            result.output
         }
       }
       .async
@@ -189,42 +180,4 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
       .tick(0 millis, reconnectInterval, RetryTick)
       .mapMaterializedValue(_ ⇒ NotUsed)
 
-  private def incNumberOfAttempts[T](buffer: Seq[RetriableMessage[T]]): Seq[RetriableMessage[T]] = {
-    logger.debug(s"buffer before update attempts: $buffer")
-    buffer
-      .map(el ⇒ el.copy(attemptsCounter = el.attemptsCounter + 1))
-  }
-
-  private def spitByAttempts[T](
-      buffer: Seq[RetriableMessage[T]],
-      maxRetries: Int): (Seq[RetriableMessage[T]], Seq[RetriableMessage[T]]) = {
-    buffer
-      .partition(_.attemptsCounter > maxRetries)
-  }
-
-  private def send[T](
-      buffer: Seq[RetriableMessage[T]],
-      connection: ActiveConnection,
-      maxRetries: Int,
-      serializer: T ⇒ ByteString): SendResult[T] = {
-
-    val (sent, notSent) = buffer.partition { el ⇒
-      rabbitService.send(connection, serializer(el.message))
-    }
-
-    val (tooManyAttempts, updatedBuffer) = spitByAttempts(incNumberOfAttempts(notSent), maxRetries)
-
-    val successful = sent.map { el ⇒
-      PassThroughStatusMessage(MessageSent, el.message)
-    }
-
-    val failures = tooManyAttempts.map(wrapIntoTooManyAttemptsMessage(maxRetries))
-    SendResult(successful ++ failures, updatedBuffer)
-  }
-
-  private def wrapIntoTooManyAttemptsMessage[T](maxRetries: Int)(
-      retriableMessage: RetriableMessage[T]) =
-    PassThroughStatusMessage(
-      FailedToSent(TooManyAttempts(retriableMessage.attemptsCounter, maxRetries + 1)),
-      retriableMessage.message)
 }
