@@ -1,5 +1,6 @@
 import sbt.Level
 
-addSbtPlugin("com.geirsson" % "sbt-scalafmt" % "1.3.0")
+addSbtPlugin("com.geirsson" % "sbt-scalafmt" % "1.5.1")
+addSbtPlugin("org.foundweekends" % "sbt-bintray" % "0.5.4")
 
 logLevel := Level.Warn
