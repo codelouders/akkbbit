@@ -3,5 +3,5 @@ import com.codelouders.akkbbit.common.RabbitChannelConfig
 
 trait AkkbbitConsumerSource {
 
-  def createSource(rabbitChannel: RabbitChannelConfig)
+  def createSource(rabbitChannel: RabbitChannelConfig, autoAck: Boolean)
 }
