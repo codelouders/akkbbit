@@ -73,6 +73,9 @@ object ExampleWithTransformation extends App {
   val rabbitChannelConfig = RabbitChannelConfig(RabbitQueueConfig("queueName"), None, None)
   val producerBuilder = new AkkbbitProducer(service, connectionProvider)
 
+  // that sink due to Mergehub nature should be always running and can be reused by many "producers"
+  val alwaysRunningSinkViaRabbitFlow = reusableSink()
+
   // use this Sink anywhere in your app to send msg to rabbit.
   Source
     .single(123)
@@ -83,8 +86,7 @@ object ExampleWithTransformation extends App {
     .single(321)
     .runWith(alwaysRunningSinkViaRabbitFlow)
 
-  // that sink due to Mergehub nature should be always running and can be reused by many "producers"
-  lazy val alwaysRunningSinkViaRabbitFlow: Sink[Int, NotUsed] =
+  def reusableSink(): Sink[Int, NotUsed] =
     MergeHub
       .source[Int](8)
       // TRANSFORMATION BEFORE SEND
