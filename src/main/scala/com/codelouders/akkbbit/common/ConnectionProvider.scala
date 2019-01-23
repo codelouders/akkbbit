@@ -51,16 +51,15 @@ class ConnectionProvider(
         {
           case GetConnection ⇒
             if (connection.exists(_.isOpen))
-              Seq(ConnectionUpdate.Connected(connection.get))
+              Seq(ConnectionUpdate.ConnectionResend(connection.get))
             else {
               connection = rabbitService.connect(connectionParams)
 
               Seq(
-                connection
-                  .map { conn ⇒
-                    ConnectionUpdate.Connected(conn)
-                  }
-                  .getOrElse(ConnectionUpdate.NotConnected))
+                connection.fold[ConnectionUpdate](ConnectionUpdate.NotConnected) { conn ⇒
+                  ConnectionUpdate.NewConnection(conn)
+                }
+              )
             }
         }
       }

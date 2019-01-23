@@ -3,7 +3,8 @@ import com.rabbitmq.client.Connection
 
 private[akkbbit] trait ConnectionUpdate
 private[akkbbit] object ConnectionUpdate {
-  private[akkbbit] case class Connected(connection: Connection) extends ConnectionUpdate
+  private[akkbbit] case class NewConnection(connection: Connection) extends ConnectionUpdate
+  private[akkbbit] case class ConnectionResend(connection: Connection) extends ConnectionUpdate
   private[akkbbit] case object NotConnected extends ConnectionUpdate
 }
 

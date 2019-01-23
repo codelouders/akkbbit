@@ -9,7 +9,10 @@ Provides Akka stream's sources, flows and sinks to connect to Rabbit.
 ## Examples
 
 ### Simple queue sink
+In this
+
 ```scala
+
 package com.codelouders.akkbbit.example
 
 import java.nio.ByteOrder
@@ -30,7 +33,7 @@ import com.codelouders.akkbbit.rabbit.RabbitService
 
 import scala.concurrent.duration._
 
-object SinkExampleWithSimpleQueue {
+object SinkExampleWithSimpleQueue {  
 
   implicit val as: ActorSystem = ActorSystem(s"test-${UUID.randomUUID()}")
   implicit val am: ActorMaterializer = ActorMaterializer()
@@ -58,6 +61,10 @@ object SinkExampleWithSimpleQueue {
 }
 ```
 ### Simple queue flow example
+In this casee we want to create flow which internally is going to retry 5 times if connection to rabbit is lost.
+It will return either PassThroughStatusMessage with a success and original message or error and original message.
+PassThroughStatusMessage and the fact of being able to access original message can be really powerful 
+especially together with commitable message. It can be used to acknowledge or not message read from consumer.   
 
 ```scala
 package com.codelouders.akkbbit.example
@@ -103,7 +110,7 @@ object FlowExampleWithSimpleQueue extends App {
   Source
     .fromIterator(() ⇒ Iterator from 0)
     .throttle(1, 500 millis, 1, ThrottleMode.Shaping)
-    .via(producerBuilder.createFlow(serialiser, rabbitChannelConfig))
+    .via(producerBuilder.createFlow(serialiser, rabbitChannelConfig, maxRetries = 5, maxBufferSize = 4096))
     .map {
       case original @ PassThroughStatusMessage(MessageSent, message) ⇒
         // message → access to original message when sending to rabbit succeeded

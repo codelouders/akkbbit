@@ -4,6 +4,11 @@ import akka.NotUsed
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, MergeHub, Sink, Source}
 import akka.util.ByteString
+import com.codelouders.akkbbit.common.ConnectionUpdate.{
+  ConnectionResend,
+  NewConnection,
+  NotConnected
+}
 import com.codelouders.akkbbit.common._
 import com.codelouders.akkbbit.producer.IncomingMessage.{ConnectionInfo, MessageToSend, RetryTick}
 import com.codelouders.akkbbit.rabbit.RabbitService
@@ -147,7 +152,8 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
             buffer = result.updatedBuffer
             result.output
 
-          case ConnectionInfo(newConn) ⇒
+          case ConnectionInfo(newConn: NewConnection) ⇒
+            logger.info("New connection.")
             connection = rabbitService.setUpChannel(newConn, connectionParams)
             connection match {
               case Some(conn) if rabbitService.isAlive(conn) ⇒
@@ -157,6 +163,24 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
               case _ ⇒
                 Seq.empty
             }
+
+          case ConnectionInfo(newConn: ConnectionResend)
+              if !connection.exists(rabbitService.isAlive) ⇒
+            logger.info("Refreshing connection.")
+            connection = rabbitService.setUpChannel(newConn, connectionParams)
+            connection match {
+              case Some(conn) if rabbitService.isAlive(conn) ⇒
+                val result = producerStateService.send(buffer, conn)
+                buffer = result.updatedBuffer
+                result.output
+              case _ ⇒
+                Seq.empty
+            }
+
+          case ConnectionInfo(NotConnected) ⇒
+            connection = None
+            logger.info("Lost connection.")
+            Seq.empty
 
           case MessageToSend(msg) ⇒
             buffer = producerStateService.addNewMessageToBuffer(buffer, msg)
