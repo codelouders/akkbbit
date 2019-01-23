@@ -1,9 +1,8 @@
 package com.codelouders.akkbbit
-import akka.NotUsed
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, Sink, Source}
+import akka.stream.scaladsl.{BroadcastHub, Keep, MergeHub, Source}
 import akka.util.ByteString
-import com.codelouders.akkbbit.common.ConnectionUpdate.Connected
+import com.codelouders.akkbbit.common.ConnectionUpdate.NewConnection
 import com.codelouders.akkbbit.common.ControlMsg.GetConnection
 import com.codelouders.akkbbit.common._
 import com.codelouders.akkbbit.rabbit.RabbitService
@@ -24,7 +23,7 @@ class StubService extends RabbitService with LazyLogging {
     Some(null)
 
   override def setUpChannel(
-      connection: ConnectionUpdate,
+      connection: Connection,
       connectionParams: RabbitChannelConfig): Option[ActiveConnection] = {
     isAliveState = true
     Some(ActiveConnection(null, null, connectionParams))
@@ -49,7 +48,7 @@ class StubConnectionProvider(service: RabbitService)(implicit ac: ActorMateriali
       .source[ControlMsg](8)
       .map { _ ⇒
         logger.info("Getting connection")
-        Connected(null)
+        NewConnection(null)
       }
       .toMat(BroadcastHub.sink(8))(Keep.both)
       .run()

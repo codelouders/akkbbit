@@ -38,42 +38,36 @@ class RabbitService extends LazyLogging {
   }
 
   def setUpChannel(
-      rabbitConn: ConnectionUpdate,
+      rabbitConn: Connection,
       channelConfig: RabbitChannelConfig): Option[ActiveConnection] = {
 
-    rabbitConn match {
+    Try {
+      val channel = rabbitConn.createChannel()
+      channel.queueDeclare(
+        channelConfig.queue.name,
+        channelConfig.queue.durable,
+        channelConfig.queue.exclusive,
+        channelConfig.queue.autoDelete,
+        channelConfig.queue.arguments.asJava
+      )
 
-      case ConnectionUpdate.Connected(connection) ⇒
-        val channel = connection.createChannel()
+      channelConfig.exchange.foreach { exchange ⇒
+        channel.exchangeDeclare(exchange.name, exchange.exchangeType, exchange.durable)
+      }
 
-        Try {
-          channel.queueDeclare(
-            channelConfig.queue.name,
-            channelConfig.queue.durable,
-            channelConfig.queue.exclusive,
-            channelConfig.queue.autoDelete,
-            channelConfig.queue.arguments.asJava
-          )
+      channelConfig.binding.foreach { binding =>
+        channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
+      }
 
-          channelConfig.exchange.foreach { exchange ⇒
-            channel.exchangeDeclare(exchange.name, exchange.exchangeType, exchange.durable)
-          }
+      ActiveConnection(rabbitConn, channel, channelConfig)
+    }.fold(
+      { e ⇒
+        logger.error(s"Cannot connect: ${e.getMessage}", e)
+        None
+      },
+      Some(_)
+    )
 
-          channelConfig.binding.foreach { binding =>
-            channel.queueBind(binding.queue.name, binding.exchange.name, binding.routingKey)
-          }
-
-          ActiveConnection(connection, channel, channelConfig)
-        }.fold(
-          { e ⇒
-            logger.error(s"Cannot connect: ${e.getMessage}", e)
-            None
-          },
-          Some(_)
-        )
-
-      case ConnectionUpdate.NotConnected ⇒ None
-    }
   }
 
   def isAlive(connection: ActiveConnection): Boolean =

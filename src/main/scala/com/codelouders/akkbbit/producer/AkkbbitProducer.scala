@@ -152,7 +152,7 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
             buffer = result.updatedBuffer
             result.output
 
-          case ConnectionInfo(newConn: NewConnection) ⇒
+          case ConnectionInfo(NewConnection(newConn)) ⇒
             logger.info("New connection.")
             connection = rabbitService.setUpChannel(newConn, connectionParams)
             connection match {
@@ -164,10 +164,10 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
                 Seq.empty
             }
 
-          case ConnectionInfo(newConn: ConnectionResend)
+          case ConnectionInfo(ConnectionResend(resendConn))
               if !connection.exists(rabbitService.isAlive) ⇒
             logger.info("Refreshing connection.")
-            connection = rabbitService.setUpChannel(newConn, connectionParams)
+            connection = rabbitService.setUpChannel(resendConn, connectionParams)
             connection match {
               case Some(conn) if rabbitService.isAlive(conn) ⇒
                 val result = producerStateService.send(buffer, conn)

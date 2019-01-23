@@ -5,7 +5,7 @@ lazy val root = (project in file("."))
     .settings(
       name := "akkbbit",
       organization := "com.codelouders",
-      version := "0.1.8",
+      version := "0.1.9",
       scalaVersion := "2.12.8"
     )
     .settings(
