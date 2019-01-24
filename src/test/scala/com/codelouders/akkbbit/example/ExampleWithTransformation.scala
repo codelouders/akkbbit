@@ -99,6 +99,7 @@ object ExampleWithTransformation extends App {
           Left(PassThroughError(MyDomainError("Failed to transform"), in))
         }
       }
+      .async
       // flow which will only try to send in case of transformation success
       .via(flowWithErrorSupport)
       // result processing.
@@ -142,8 +143,8 @@ object ExampleWithTransformation extends App {
           .map(Right(_))
 
       // format: off
-      broadcast ~> sendFlow     ~> merge
-      broadcast ~> errorsFilter ~> merge
+      broadcast ~> sendFlow.async     ~> merge
+      broadcast ~> errorsFilter.async ~> merge
       // format: on
 
       FlowShape(broadcast.in, merge.out)

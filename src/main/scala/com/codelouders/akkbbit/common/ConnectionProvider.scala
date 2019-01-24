@@ -54,9 +54,7 @@ class ConnectionProvider(
             if (connection.exists(_.isOpen))
               Seq(ConnectionUpdate.ConnectionResend(connection.get))
             else {
-
               connection.foreach(rabbitService.close)
-
               connection = rabbitService.connect(connectionParams)
 
               Seq(

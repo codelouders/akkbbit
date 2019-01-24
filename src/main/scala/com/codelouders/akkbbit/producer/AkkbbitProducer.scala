@@ -177,6 +177,10 @@ class AkkbbitProducer(rabbitService: RabbitService, connectionProvider: Connecti
                 Seq.empty
             }
 
+          case ConnectionInfo(ConnectionResend(resendConn)) ⇒
+            //we already have working connection
+            Seq.empty
+
           case ConnectionInfo(NotConnected) ⇒
             connection = None
             logger.info("Lost connection.")
