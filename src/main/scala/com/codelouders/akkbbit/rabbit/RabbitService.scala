@@ -73,6 +73,12 @@ class RabbitService extends LazyLogging {
   def isAlive(connection: ActiveConnection): Boolean =
     connection.connection.isOpen && connection.channel.isOpen
 
+  def close(connection: Connection): Unit = {
+    Try {
+      connection.close()
+    }
+  }
+
   //do we need channel here?
   def send(connection: ActiveConnection, data: ByteString): Boolean = {
     Try {

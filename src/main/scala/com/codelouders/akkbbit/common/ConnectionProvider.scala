@@ -10,6 +10,7 @@ import com.typesafe.scalalogging.LazyLogging
 import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
   * New instance of this class = new connection to rabbit.
@@ -53,6 +54,9 @@ class ConnectionProvider(
             if (connection.exists(_.isOpen))
               Seq(ConnectionUpdate.ConnectionResend(connection.get))
             else {
+
+              connection.foreach(rabbitService.close)
+
               connection = rabbitService.connect(connectionParams)
 
               Seq(

@@ -34,6 +34,8 @@ class StubService extends RabbitService with LazyLogging {
     isAliveState
   }
 
+  override def close(connection: Connection): Unit = {}
+
   override def send(connection: ActiveConnection, data: ByteString): Boolean = {
     logger.info(s"[send]: isAliveState: $isAliveState")
     isAliveState
