@@ -1,4 +1,5 @@
-# akkbbit
+# akkbbit - Akka stream connector to RabbitMQ. 
+
 Provides Akka streams sources, flows and sinks to connect to RabbitMQ. 
 
 ## Features: 
