@@ -1,5 +1,5 @@
 # akkbbit
-Provides Akka stream's sources, flows and sinks to connect to Rabbit. 
+Provides Akka streams sources, flows and sinks to connect to RabbitMQ. 
 
 ## Features: 
  - Automatically reconnects.
